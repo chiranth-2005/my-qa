@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Q&A Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="logo">
+            <span class="logo-dot"></span>
+            <span class="logo-text">PDF Q&A</span>
+        </div>
+
+        <div class="section">
+            <h2>Upload PDFs</h2>
+            <form id="upload-form">
+                <input type="file" id="pdfs" name="pdfs" multiple accept=".pdf">
+                <button type="submit" class="btn primary">Upload</button>
+            </form>
+            <p class="hint">Upload your notes / question banks here.</p>
+        </div>
+
+        <div class="section">
+            <h2>Available PDFs</h2>
+            <div class="file-list" id="file-list">
+                {% if files %}
+                    {% for f in files %}
+                        <label class="file-item">
+                            <input type="checkbox" class="pdf-checkbox" value="{{ f }}" checked>
+                            <span>{{ f }}</span>
+                        </label>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty">No PDFs uploaded yet.</p>
+                {% endif %}
+            </div>
+            <button id="select-all-btn" class="btn ghost small">Toggle Select All</button>
+        </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="chat">
+        <header class="chat-header">
+            <div>
+                <h1>PDF Answer Assistant</h1>
+                <p class="subtitle">Ask any question from your uploaded PDFs. Clean, point-wise answers with a ChatGPT-style UI.</p>
+            </div>
+        </header>
+
+        <section class="question-box">
+            <textarea id="question-input" rows="3" placeholder="Type your question here..."></textarea>
+            <div class="question-actions">
+                <span id="status-text" class="status-text"></span>
+                <button id="ask-btn" class="btn primary">Ask</button>
+            </div>
+        </section>
+
+        <section id="answers" class="answers">
+            <!-- Answers will appear here -->
+        </section>
+    </main>
+</div>
+
+<!-- Markdown parser -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+<script>
+    const uploadForm = document.getElementById('upload-form');
+    const pdfInput = document.getElementById('pdfs');
+    const fileListDiv = document.getElementById('file-list');
+    const selectAllBtn = document.getElementById('select-all-btn');
+    const askBtn = document.getElementById('ask-btn');
+    const questionInput = document.getElementById('question-input');
+    const answersDiv = document.getElementById('answers');
+    const statusText = document.getElementById('status-text');
+
+    function setStatus(msg) {
+        statusText.textContent = msg || '';
+    }
+
+    function showToast(msg) {
+        setStatus(msg);
+        setTimeout(() => setStatus(''), 3500);
+    }
+
+    // Upload PDFs
+    uploadForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!pdfInput.files.length) {
+            showToast('Select at least one PDF to upload.');
+            return;
+        }
+
+        const formData = new FormData();
+        for (const f of pdfInput.files) {
+            formData.append('pdfs', f);
+        }
+
+        setStatus('Uploading and processing PDFs...');
+
+        try {
+            const res = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+            if (!data.ok) {
+                showToast('Upload failed.');
+                return;
+            }
+
+            // Rebuild file list
+            fileListDiv.innerHTML = '';
+            if (data.files.length === 0) {
+                fileListDiv.innerHTML = '<p class="empty">No PDFs uploaded.</p>';
+            } else {
+                data.files.forEach(name => {
+                    const label = document.createElement('label');
+                    label.className = 'file-item';
+                    label.innerHTML = `
+                        <input type="checkbox" class="pdf-checkbox" value="${name}" checked>
+                        <span>${name}</span>
+                    `;
+                    fileListDiv.appendChild(label);
+                });
+            }
+
+            showToast(`Uploaded: ${data.saved.length}, Skipped: ${data.skipped.length}`);
+            pdfInput.value = '';
+
+        } catch (err) {
+            console.error(err);
+            showToast('Error uploading PDFs.');
+        }
+    });
+
+    // Toggle Select All
+    selectAllBtn.addEventListener('click', () => {
+        const boxes = document.querySelectorAll('.pdf-checkbox');
+        if (!boxes.length) return;
+
+        const allChecked = Array.from(boxes).every(b => b.checked);
+        boxes.forEach(b => b.checked = !allChecked);
+    });
+
+    // Ask question
+    askBtn.addEventListener('click', async () => {
+        const question = questionInput.value.trim();
+        const selected = Array.from(document.querySelectorAll('.pdf-checkbox'))
+            .filter(b => b.checked)
+            .map(b => b.value);
+
+        if (!question) {
+            showToast('Enter a question.');
+            return;
+        }
+
+        if (!selected.length) {
+            showToast('Select at least one PDF.');
+            return;
+        }
+
+        setStatus('Thinking…');
+        askBtn.disabled = true;
+        askBtn.textContent = 'Processing…';
+
+        try {
+            const res = await fetch('/ask', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    question: question,
+                    selected_pdfs: selected
+                })
+            });
+
+            const data = await res.json();
+            answersDiv.innerHTML = '';
+
+            if (!data.ok) {
+                showToast(data.msg || 'Error answering question.');
+                return;
+            }
+
+            if (!data.answers.length) {
+                answersDiv.innerHTML = '<div class="answer-card"><h3>No answer found</h3><p>Could not find relevant content in the selected PDFs.</p></div>';
+                return;
+            }
+
+            data.answers.forEach(ans => {
+                const card = document.createElement('div');
+                card.className = 'answer-card';
+
+                const heading = document.createElement('div');
+                heading.className = 'answer-header';
+                heading.innerHTML = `
+                    <div>
+                        <h3>${ans.pdf}</h3>
+                        <p class="answer-subtitle">Answer generated from this PDF</p>
+                    </div>
+                    <button class="btn ghost small copy-btn">Copy</button>
+                `;
+
+                const body = document.createElement('div');
+                body.className = 'answer-body';
+
+                const html = marked.parse(ans.answer || '');
+                body.innerHTML = html;
+
+                card.appendChild(heading);
+                card.appendChild(body);
+                answersDiv.appendChild(card);
+
+                const copyBtn = heading.querySelector('.copy-btn');
+                copyBtn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(ans.answer || '')
+                        .then(() => showToast('Answer copied to clipboard.'))
+                        .catch(() => showToast('Failed to copy.'));
+                });
+            });
+
+        } catch (err) {
+            console.error(err);
+            showToast('Error while answering.');
+        } finally {
+            askBtn.disabled = false;
+            askBtn.textContent = 'Ask';
+            setStatus('');
+        }
+    });
+</script>
+
+</body>
+</html>

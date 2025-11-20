@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Answers - AI PDF Q&A</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>💬 Answers</h1>
+    <p><strong>Question:</strong> {{ question }}</p>
+    <p><strong>Time Taken:</strong> {{ time_taken }} sec</p>
+
+    {% if answers %}
+      {% for name, text in answers %}
+        <div class="answer-box">
+          <h3>📄 {{ name }}</h3>
+          <p>{{ text }}</p>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p>No relevant answer found.</p>
+    {% endif %}
+
+    <a href="/" class="back-btn">← Ask Another Question</a>
+  </div>
+</body>
+</html>
